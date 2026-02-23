@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 简历匹配 - 发现好工作</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+
+<body>
+
+    <header class="header">
+        <div class="header-content">
+            <h1>精准职位匹配</h1>
+            <div class="header-actions">
+                <div class="upload-container">
+                    <input type="file" id="resumeFile" accept="application/pdf" style="display: none;">
+                    <label for="resumeFile" class="upload-btn">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                            <path
+                                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z" />
+                        </svg>
+                        上传 PDF 简历进行匹配
+                    </label>
+                </div>
+                <button id="resetBtn" class="reset-btn" style="display: none;" onclick="resetState()">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                        <path
+                            d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" />
+                    </svg>
+                    还原
+                </button>
+            </div>
+            <div id="uploadStatus" class="upload-status"></div>
+        </div>
+    </header>
+
+    <main class="main-container">
+        <div id="jobGrid" class="job-grid">
+            <!-- Job cards will be injected here via JavaScript -->
+        </div>
+        <div id="loadingIndicator" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>正在分析并匹配专属职位...</p>
+        </div>
+    </main>
+
+    <!-- Job Detail Modal -->
+    <div id="jobModal" class="modal-overlay" onclick="closeModalOnOverlay(event)">
+        <div class="modal-card">
+            <button class="modal-close" onclick="closeModal()">✕</button>
+
+            <div class="modal-header">
+                <div class="modal-salary" id="modalSalary"></div>
+                <div class="modal-title" id="modalTitle"></div>
+                <div class="modal-reqs" id="modalReqs"></div>
+            </div>
+
+            <div class="modal-tags" id="modalTags"></div>
+
+            <div class="modal-divider"></div>
+
+            <div class="modal-analysis-section">
+                <div class="modal-analysis-title">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                        <path
+                            d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1v2h-1v1a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1H1v-2h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M7.5 13A2.5 2.5 0 0 0 5 15.5 2.5 2.5 0 0 0 7.5 18 2.5 2.5 0 0 0 10 15.5 2.5 2.5 0 0 0 7.5 13m9 0a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0 2.5 2.5 2.5 2.5 0 0 0 2.5-2.5 2.5 2.5 0 0 0-2.5-2.5z" />
+                    </svg>
+                    AI 职位深度解析
+                </div>
+                <div id="modalAnalysisContent" class="modal-analysis-content">
+                    <div class="analysis-loading">
+                        <div class="spinner spinner-sm"></div>
+                        <span>AI 正在分析这个职位...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentResumeId = null;
+        let analysisCache = {}; // Cache: jobId -> analysis text
+        let currentJobData = null;
+
+        document.getElementById('resumeFile').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const statusDiv = document.getElementById('uploadStatus');
+            statusDiv.textContent = '上传中...';
+            statusDiv.className = 'upload-status uploading';
+
+            try {
+                const response = await fetch('/api/resume/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    currentResumeId = data.resumeId;
+                    statusDiv.textContent = '简历已上传，AI 正在分析并寻找匹配...';
+                    statusDiv.className = 'upload-status success';
+
+                    // Show reset button
+                    document.getElementById('resetBtn').style.display = 'inline-flex';
+
+                    document.getElementById('jobGrid').innerHTML = '';
+                    document.getElementById('loadingIndicator').style.display = 'flex';
+
+                    // Poll for match results since backend processing is async via MQ
+                    setTimeout(fetchJobs, 2000);
+                    setTimeout(fetchJobs, 5000);
+                    setTimeout(fetchJobs, 10000);
+                } else {
+                    statusDiv.textContent = '上传失败，请重试';
+                    statusDiv.className = 'upload-status error';
+                }
+            } catch (error) {
+                statusDiv.textContent = '网络错误';
+                statusDiv.className = 'upload-status error';
+            }
+        });
+
+        function resetState() {
+            currentResumeId = null;
+            analysisCache = {};
+            currentJobData = null;
+
+            // Reset UI
+            const statusDiv = document.getElementById('uploadStatus');
+            statusDiv.textContent = '';
+            statusDiv.className = 'upload-status';
+
+            document.getElementById('resetBtn').style.display = 'none';
+            document.getElementById('resumeFile').value = '';
+            document.getElementById('jobGrid').innerHTML = '';
+            document.getElementById('loadingIndicator').style.display = 'none';
+
+            // Reload default jobs
+            fetchJobs();
+        }
+
+        async function fetchJobs() {
+            let url = '/api/jobs/match';
+            if (currentResumeId) {
+                url += `?resumeId=${currentResumeId}`;
+            }
+
+            try {
+                const response = await fetch(url);
+                const jobs = await response.json();
+                renderJobs(jobs);
+            } catch (error) {
+                console.error('Failed to fetch jobs', error);
+            } finally {
+                document.getElementById('loadingIndicator').style.display = 'none';
+            }
+        }
+
+        function renderJobs(jobs) {
+            const grid = document.getElementById('jobGrid');
+            grid.innerHTML = '';
+
+            if (jobs.length === 0) {
+                grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #888;">暂时没有找到匹配的职位</div>';
+                return;
+            }
+
+            jobs.forEach(job => {
+                const skills = job.skillsRequirement.slice(0, 3).map(s => `<span class="tag">${s}</span>`).join('');
+                const card = document.createElement('div');
+                card.className = 'job-card';
+                card.innerHTML = `
+                    <div class="card-salary">${job.salary}</div>
+                    <div class="card-title">${job.title}</div>
+                    <div class="card-reqs">
+                        <span><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg> ${job.location}</span>
+                        <span>🎓 ${job.educationRequirement}</span>
+                        <span>📅 ${job.graduationTimeRange}届</span>
+                    </div>
+                    <div class="card-tags">
+                        ${skills}
+                        ${job.skillsRequirement.length > 3 ? `<span class="tag">+${job.skillsRequirement.length - 3}</span>` : ''}
+                    </div>
+                    <div class="card-footer">
+                        <span>专业要求: ${job.targetMajor}</span>
+                        <span class="card-detail-hint">点击查看详情 →</span>
+                    </div>
+                `;
+                card.addEventListener('click', () => openJobModal(job));
+                grid.appendChild(card);
+            });
+        }
+
+        function openJobModal(job) {
+            currentJobData = job;
+            const modal = document.getElementById('jobModal');
+
+            // Populate header
+            document.getElementById('modalSalary').textContent = job.salary;
+            document.getElementById('modalTitle').textContent = job.title;
+            document.getElementById('modalReqs').innerHTML = `
+                <span><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>&nbsp;${job.location}</span>
+                <span>🎓 ${job.educationRequirement}</span>
+                <span>📅 ${job.graduationTimeRange}届</span>
+                <span>🎯 ${job.targetMajor}</span>
+            `;
+
+            // Populate tags
+            const allSkills = job.skillsRequirement.map(s => `<span class="tag">${s}</span>`).join('');
+            document.getElementById('modalTags').innerHTML = allSkills;
+
+            // Show modal
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+
+            // Load analysis (or use cache)
+            loadAnalysis(job);
+        }
+
+        async function loadAnalysis(job) {
+            const contentDiv = document.getElementById('modalAnalysisContent');
+            const cacheKey = job.id || job.title;
+
+            if (analysisCache[cacheKey]) {
+                contentDiv.innerHTML = formatAnalysis(analysisCache[cacheKey]);
+                return;
+            }
+
+            // Show loading
+            contentDiv.innerHTML = `
+                <div class="analysis-loading">
+                    <div class="spinner spinner-sm"></div>
+                    <span>AI 正在深度分析这个职位...</span>
+                </div>
+            `;
+
+            try {
+                const response = await fetch('/api/jobs/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(job)
+                });
+                const data = await response.json();
+                const analysis = data.analysis || '暂无分析';
+                analysisCache[cacheKey] = analysis;
+
+                // Only update if same job is still open
+                if (currentJobData === job) {
+                    contentDiv.innerHTML = formatAnalysis(analysis);
+                }
+            } catch (err) {
+                if (currentJobData === job) {
+                    contentDiv.innerHTML = '<p style="color:#ff4d4f;">获取分析失败，请稍后重试。</p>';
+                }
+            }
+        }
+
+        function formatAnalysis(text) {
+            // Convert markdown-like formatting to HTML
+            return text
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\n\n/g, '</p><p>')
+                .replace(/\n/g, '<br>')
+                .replace(/^/, '<p>')
+                .replace(/$/, '</p>');
+        }
+
+        function closeModal() {
+            document.getElementById('jobModal').classList.remove('active');
+            document.body.style.overflow = '';
+            currentJobData = null;
+        }
+
+        function closeModalOnOverlay(e) {
+            if (e.target === document.getElementById('jobModal')) {
+                closeModal();
+            }
+        }
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
+        });
+
+        // Fetch generic jobs on load
+        fetchJobs();
+    </script>
+</body>
+
+</html>
