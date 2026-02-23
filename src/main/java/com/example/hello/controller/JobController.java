@@ -20,8 +20,11 @@ public class JobController {
     private LLMService llmService;
 
     @GetMapping("/match")
-    public List<JobPosition> getMatchedJobs(@RequestParam(value = "resumeId", required = false) String resumeId) {
-        return jobMatchingService.getMatchedJobs(resumeId);
+    public List<JobPosition> getMatchedJobs(
+            @RequestParam(value = "resumeId", required = false) String resumeId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return jobMatchingService.getMatchedJobs(resumeId, page, size);
     }
 
     @PostMapping("/analyze")

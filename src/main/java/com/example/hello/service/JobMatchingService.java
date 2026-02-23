@@ -24,14 +24,14 @@ public class JobMatchingService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public List<JobPosition> getMatchedJobs(String resumeId) {
+    public List<JobPosition> getMatchedJobs(String resumeId, int page, int size) {
         if (resumeId == null || resumeId.isEmpty()) {
-            return getAllJobs();
+            return getAllJobs(page, size);
         }
 
         Optional<StructuredResume> resumeOpt = structuredResumeRepository.findByResumeId(resumeId);
         if (resumeOpt.isEmpty()) {
-            return getAllJobs();
+            return getAllJobs(page, size);
         }
 
         StructuredResume resume = resumeOpt.get();
@@ -66,17 +66,20 @@ public class JobMatchingService {
         // Sort by score descending
         scoredJobs.sort((a, b) -> Integer.compare(b.score, a.score));
 
-        // Group the top 20
-        return scoredJobs.stream()
-                .limit(20)
+        // Group the top based on pagination
+        int from = page * size;
+        if (from >= scoredJobs.size()) return new ArrayList<>();
+        int to = Math.min(from + size, scoredJobs.size());
+
+        return scoredJobs.subList(from, to).stream()
                 .map(js -> js.job)
                 .collect(Collectors.toList());
     }
 
-    private List<JobPosition> getAllJobs() {
+    private List<JobPosition> getAllJobs(int page, int size) {
         List<JobPosition> jobs = new ArrayList<>();
-        // Fetch up to 20 generic jobs if no resume
-        jobPositionRepository.findAll(PageRequest.of(0, 20)).forEach(jobs::add);
+        // Fetch paginated generic jobs if no resume
+        jobPositionRepository.findAll(PageRequest.of(page, size)).forEach(jobs::add);
         return jobs;
     }
 

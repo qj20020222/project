@@ -24,6 +24,13 @@
                         上传 PDF 简历进行匹配
                     </label>
                 </div>
+                <button id="refreshBtn" class="refresh-btn" onclick="refreshJobs()">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                        <path
+                            d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
+                    </svg>
+                    刷新
+                </button>
                 <button id="resetBtn" class="reset-btn" style="display: none;" onclick="resetState()">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                         <path
@@ -42,7 +49,7 @@
         </div>
         <div id="loadingIndicator" class="loading" style="display: none;">
             <div class="spinner"></div>
-            <p>正在分析并匹配专属职位...</p>
+            <p id="loadingText">正在加载职位...</p>
         </div>
     </main>
 
@@ -84,6 +91,12 @@
         let analysisCache = {}; // Cache: jobId -> analysis text
         let currentJobData = null;
 
+        // Pagination state
+        let currentPage = 0;
+        const pageSize = 10;
+        let isLoading = false;
+        let hasMore = true;
+
         document.getElementById('resumeFile').addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -110,13 +123,11 @@
                     // Show reset button
                     document.getElementById('resetBtn').style.display = 'inline-flex';
 
-                    document.getElementById('jobGrid').innerHTML = '';
-                    document.getElementById('loadingIndicator').style.display = 'flex';
+                    // Reset and fetch
+                    refreshJobs();
 
-                    // Poll for match results since backend processing is async via MQ
-                    setTimeout(fetchJobs, 2000);
-                    setTimeout(fetchJobs, 5000);
-                    setTimeout(fetchJobs, 10000);
+                    // Poll for initial match results (backend processing might be async)
+                    setTimeout(refreshJobs, 2000);
                 } else {
                     statusDiv.textContent = '上传失败，请重试';
                     statusDiv.className = 'upload-status error';
@@ -139,35 +150,52 @@
 
             document.getElementById('resetBtn').style.display = 'none';
             document.getElementById('resumeFile').value = '';
-            document.getElementById('jobGrid').innerHTML = '';
-            document.getElementById('loadingIndicator').style.display = 'none';
 
-            // Reload default jobs
-            fetchJobs();
+            refreshJobs();
         }
 
-        async function fetchJobs() {
-            let url = '/api/jobs/match';
+        function refreshJobs() {
+            currentPage = 0;
+            hasMore = true;
+            document.getElementById('jobGrid').innerHTML = '';
+            fetchJobs(true);
+        }
+
+        async function fetchJobs(isInitial = false) {
+            if (isLoading || !hasMore) return;
+
+            isLoading = true;
+            const loader = document.getElementById('loadingIndicator');
+            loader.style.display = 'flex';
+
+            let url = `/api/jobs/match?page=${currentPage}&size=${pageSize}`;
             if (currentResumeId) {
-                url += `?resumeId=${currentResumeId}`;
+                url += `&resumeId=${currentResumeId}`;
             }
 
             try {
                 const response = await fetch(url);
                 const jobs = await response.json();
-                renderJobs(jobs);
+
+                if (jobs.length < pageSize) {
+                    hasMore = false;
+                }
+
+                renderJobs(jobs, isInitial);
+                currentPage++;
             } catch (error) {
                 console.error('Failed to fetch jobs', error);
             } finally {
-                document.getElementById('loadingIndicator').style.display = 'none';
+                isLoading = false;
+                loader.style.display = 'none';
             }
         }
 
-        function renderJobs(jobs) {
+        function renderJobs(jobs, clearGrid = false) {
             const grid = document.getElementById('jobGrid');
-            grid.innerHTML = '';
+            if (clearGrid) grid.innerHTML = '';
 
-            if (jobs.length === 0) {
+            if (jobs.length === 0 && grid.children.length === 0) {
                 grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #888;">暂时没有找到匹配的职位</div>';
                 return;
             }
@@ -289,8 +317,15 @@
             if (e.key === 'Escape') closeModal();
         });
 
-        // Fetch generic jobs on load
-        fetchJobs();
+        // Infinite Scroll Listener
+        window.addEventListener('scroll', () => {
+            if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) {
+                fetchJobs();
+            }
+        });
+
+        // Initial load
+        refreshJobs();
     </script>
 </body>
 

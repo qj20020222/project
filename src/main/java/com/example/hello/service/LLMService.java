@@ -140,17 +140,14 @@ public class LLMService {
                 skillsList, job.getGraduationTimeRange()
             );
 
-            String requestBody = objectMapper.writeValueAsString(
-                java.util.Map.of(
-                    "model", DEEPSEEK_MODEL,
-                    "messages", java.util.List.of(
-                        java.util.Map.of("role", "system", "content",
-                            "你是一位资深HR和职业规划师，擅长分析职位信息并给出专业建议。"),
-                        java.util.Map.of("role", "user", "content", prompt)
-                    ),
-                    "temperature", 0.7
-                )
-            );
+            String requestBody = "{\n" +
+                "  \"model\": \"" + DEEPSEEK_MODEL + "\",\n" +
+                "  \"messages\": [\n" +
+                "    {\"role\": \"system\", \"content\": \"你是一位资深HR和职业规划师，擅长分析职位信息并给出专业建议。\"},\n" +
+                "    {\"role\": \"user\", \"content\": " + objectMapper.writeValueAsString(prompt) + "}\n" +
+                "  ],\n" +
+                "  \"temperature\": 0.7\n" +
+                "}";
 
             HttpEntity<String> requestEntity = new HttpEntity<>(requestBody, headers);
             ResponseEntity<String> response = restTemplate.postForEntity(
@@ -160,10 +157,16 @@ public class LLMService {
             if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
                 JsonNode root = objectMapper.readTree(response.getBody());
                 return root.path("choices").get(0).path("message").path("content").asText();
+            } else {
+                 System.err.println("DeepSeek API Error Response: " + response.getBody());
             }
         } catch (Exception e) {
             System.err.println("DeepSeek analyzeJob failed: " + e.getMessage());
+            if (e.getMessage() != null && e.getMessage().contains("Insufficient Balance")) {
+                return "API 账户余额不足，请充值后重试 (402 Payment Required)。";
+            }
+            return "AI 暂时无法获取分析，请稍后重试。(" + e.getMessage() + ")";
         }
-        return "暂时无法获取分析，请稍后重试。";
+        return "AI 暂时无法获取分析，请稍后重试。";
     }
 }

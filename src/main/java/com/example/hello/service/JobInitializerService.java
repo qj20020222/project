@@ -35,11 +35,11 @@ public class JobInitializerService {
     @PostConstruct
     public void init() {
         if (jobPositionRepository.count() == 0) {
-            System.out.println("Database is empty. Initializing 100 mock job positions...");
+            System.out.println("Database is empty. Initializing 500 mock job positions...");
             List<JobPosition> jobs = new ArrayList<>();
             Random random = new Random();
 
-            for (int i = 0; i < 100; i++) {
+            for (int i = 0; i < 500; i++) {
                 JobPosition job = new JobPosition();
                 
                 int titleIndex = random.nextInt(TITLES.length);

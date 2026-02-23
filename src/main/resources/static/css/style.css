@@ -71,25 +71,25 @@ h1 {
 }
 
 /* Reset Button */
+.refresh-btn,
 .reset-btn {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: transparent;
-    color: #888;
-    border: 1.5px solid #ddd;
-    padding: 9px 16px;
-    border-radius: 30px;
-    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 20px;
+    border: 1px solid #e0e0e0;
+    background: white;
+    font-size: 14px;
     cursor: pointer;
     transition: all 0.2s;
-    font-size: 0.9rem;
+    color: #666;
 }
 
+.refresh-btn:hover,
 .reset-btn:hover {
     background: #f5f5f5;
-    color: #555;
-    border-color: #bbb;
+    border-color: #ccc;
 }
 
 .upload-status {
