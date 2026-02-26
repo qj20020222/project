@@ -8,17 +8,17 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
 
-    @Autowired
-    private LoginInterceptor loginInterceptor;
+    // @Autowired
+    // private LoginInterceptor loginInterceptor;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(loginInterceptor)
-                .addPathPatterns("/api/**") // 拦截所有 /api 开头的请求
-                .excludePathPatterns(
-                        "/api/auth/login",
-                        "/api/auth/register",
-                        "/api/auth/currentUser" // 让前端随时都可以查询当前状态
-                );
+        // registry.addInterceptor(loginInterceptor)
+        //         .addPathPatterns("/api/**") // 拦截所有 /api 开头的请求
+        //         .excludePathPatterns(
+        //                 "/api/auth/login",
+        //                 "/api/auth/register",
+        //                 "/api/auth/currentUser" // 让前端随时都可以查询当前状态
+        //         );
     }
 }

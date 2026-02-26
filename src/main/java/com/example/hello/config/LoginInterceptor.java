@@ -7,7 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-@Component
+// @Component
 public class LoginInterceptor implements HandlerInterceptor {
 
     @Override
@@ -18,7 +18,13 @@ public class LoginInterceptor implements HandlerInterceptor {
         }
 
         HttpSession session = request.getSession(false);
-        if (session != null && session.getAttribute("userId") != null) {
+        boolean isLegacyAuthenticated = session != null && session.getAttribute("userId") != null;
+
+        // Check if authenticated via Spring Security (e.g., Google OAuth2)
+        org.springframework.security.core.Authentication authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        boolean isSpringSecurityAuthenticated = authentication != null && authentication.isAuthenticated() && !authentication.getPrincipal().equals("anonymousUser");
+
+        if (isLegacyAuthenticated || isSpringSecurityAuthenticated) {
             // 已经登录，放行
             return true;
         }

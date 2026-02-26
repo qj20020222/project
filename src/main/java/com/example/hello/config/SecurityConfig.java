@@ -14,7 +14,13 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
             .authorizeHttpRequests(authz -> authz
-                .requestMatchers("/", "/index.html", "/error", "/webjars/**").permitAll()
+                // Allow static resources and home page
+                .requestMatchers("/", "/index.html", "/error", "/css/**", "/js/**", "/images/**", "/webjars/**").permitAll()
+                // Allow our public APIs
+                .requestMatchers("/api/**").permitAll()
+                // Allow local authentication APIs (if they exist)
+                .requestMatchers("/login", "/register", "/currentUser").permitAll()
+                // Require authentication for all other requests
                 .anyRequest().authenticated()
             )
             .oauth2Login(oauth2 -> oauth2
