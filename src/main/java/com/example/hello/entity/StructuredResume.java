@@ -5,7 +5,7 @@ import jakarta.persistence.*;
 @Entity
 @Table(name = "structured_resume")
 public class StructuredResume {
-
+ 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;

@@ -14,6 +14,16 @@
         <div class="header-content">
             <h1>精准职位匹配</h1>
             <div class="header-actions">
+                <div id="authContainer" class="auth-container" style="display: flex; align-items: center; gap: 10px;">
+                    <a href="/oauth2/authorization/google" id="loginBtn" class="refresh-btn"
+                        style="text-decoration: none;">Login with Google</a>
+                    <div id="userInfo" style="display: none; align-items: center; gap: 10px;">
+                        <span id="userName" style="font-weight: bold; color: #333;"></span>
+                        <form action="/logout" method="post" style="margin: 0;">
+                            <button type="submit" class="reset-btn" style="display: inline-flex;">Logout</button>
+                        </form>
+                    </div>
+                </div>
                 <div class="upload-container">
                     <input type="file" id="resumeFile" accept="application/pdf" style="display: none;">
                     <label for="resumeFile" class="upload-btn">
@@ -326,6 +336,18 @@
 
         // Initial load
         refreshJobs();
+
+        // Check Authentication Status
+        fetch('/user/me')
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+                if (data && data.name) {
+                    document.getElementById('loginBtn').style.display = 'none';
+                    document.getElementById('userInfo').style.display = 'flex';
+                    document.getElementById('userName').textContent = 'Hi, ' + data.name;
+                }
+            })
+            .catch(err => console.log('Not authenticated:', err));
     </script>
 </body>
 
