@@ -15,3 +15,5 @@ target/
 .vscode/
 
 uploads/
+
+src/main/resources/application.properties

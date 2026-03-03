@@ -5,14 +5,18 @@ app_env=${1:-development}
 # Development environment commands
 dev_commands() {
     echo "Running development environment commands..."
-    mvn spring-boot:run
+    export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+    export PATH=$JAVA_HOME/bin:$PATH
+    ./mvnw spring-boot:run
 }
 
 # Production environment commands
 prod_commands() {
     echo "Running production environment commands..."
-    mvn clean install
-    mvn spring-boot:run
+    export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+    export PATH=$JAVA_HOME/bin:$PATH
+    ./mvnw clean install
+    ./mvnw spring-boot:run
 }
 
 # prod_commands
