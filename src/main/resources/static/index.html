@@ -351,24 +351,6 @@
 
         // Initial load
         refreshJobs();
-
-        // Check Authentication Status
-        fetch('/user/me')
-            .then(res => res.ok ? res.json() : null)
-            .then(data => {
-                if (data && data.name) {
-                    isAuthenticated = true;
-                    document.getElementById('loginBtn').style.display = 'none';
-                    document.getElementById('userInfo').style.display = 'flex';
-                    document.getElementById('userName').textContent = 'Hi, ' + data.name;
-                } else {
-                    isAuthenticated = false;
-                }
-            })
-            .catch(err => {
-                isAuthenticated = false;
-                console.log('Not authenticated:', err);
-            });
     </script>
 </body>
 
