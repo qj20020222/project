@@ -7,7 +7,7 @@ dev_commands() {
     echo "Running development environment commands..."
     export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
     export PATH=$JAVA_HOME/bin:$PATH
-    ./mvnw spring-boot:run
+    ./mvnw clean spring-boot:run
 }
 
 # Production environment commands

@@ -22,7 +22,7 @@ public class ResumeProcessingConsumer {
     @Autowired
     private StructuredResumeRepository structuredResumeRepository;
 
-    @Async
+    @Async("resumeProcessingExecutor")
     @EventListener
     public void processResume(ResumeUploadEvent event) {
         String resumeId = event.getResumeId();
