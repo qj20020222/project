@@ -101,6 +101,7 @@
         let analysisCache = {}; // Cache: jobId -> analysis text
         let currentJobData = null;
         let isAuthenticated = false; // Track login status
+        let statusPollInterval = null; // For polling resume status
 
         // Pagination state
         let currentPage = 0;
@@ -132,19 +133,17 @@
                 });
 
                 if (response.ok) {
-                    const data = await response.json();
+                    const result = await response.json();
+                    const data = result.data || result;
                     currentResumeId = data.resumeId;
-                    statusDiv.textContent = '简历已上传，AI 正在分析并寻找匹配...';
+                    statusDiv.textContent = '✅ 简历已上传，正在处理中...';
                     statusDiv.className = 'upload-status success';
 
                     // Show reset button
                     document.getElementById('resetBtn').style.display = 'inline-flex';
 
-                    // Reset and fetch
-                    refreshJobs();
-
-                    // Poll for initial match results (backend processing might be async)
-                    setTimeout(refreshJobs, 2000);
+                    // Start polling resume processing status
+                    startStatusPolling(currentResumeId);
                 } else {
                     statusDiv.textContent = '上传失败，请重试';
                     statusDiv.className = 'upload-status error';
@@ -155,10 +154,54 @@
             }
         });
 
+        /**
+         * Poll resume processing status (state machine progress).
+         * States: UPLOADED → PARSING → ANALYZING → COMPLETED | FAILED
+         */
+        function startStatusPolling(resumeId) {
+            if (statusPollInterval) clearInterval(statusPollInterval);
+
+            const statusMessages = {
+                'UPLOADED': '📤 已上传，等待处理...',
+                'PARSING': '📄 正在解析 PDF...',
+                'ANALYZING': '🤖 AI 正在分析简历...',
+                'COMPLETED': '✅ 分析完成！正在匹配职位...',
+                'FAILED': '❌ 处理失败，请重试'
+            };
+
+            statusPollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/resume/${resumeId}/status`);
+                    const result = await response.json();
+                    const data = result.data || result;
+                    const status = data.status;
+
+                    const statusDiv = document.getElementById('uploadStatus');
+                    statusDiv.textContent = statusMessages[status] || status;
+
+                    if (status === 'COMPLETED') {
+                        clearInterval(statusPollInterval);
+                        statusPollInterval = null;
+                        refreshJobs();
+                    } else if (status === 'FAILED') {
+                        clearInterval(statusPollInterval);
+                        statusPollInterval = null;
+                        statusDiv.className = 'upload-status error';
+                    }
+                } catch (err) {
+                    console.error('Status poll failed:', err);
+                }
+            }, 1500); // Poll every 1.5s
+        }
+
         function resetState() {
             currentResumeId = null;
             analysisCache = {};
             currentJobData = null;
+            if (statusPollInterval) {
+                clearInterval(statusPollInterval);
+                statusPollInterval = null;
+            }
 
             // Reset UI
             const statusDiv = document.getElementById('uploadStatus');
@@ -272,10 +315,14 @@
             modal.classList.add('active');
             document.body.style.overflow = 'hidden';
 
-            // Load analysis (or use cache)
+            // Load analysis (SSE streaming or cache)
             loadAnalysis(job);
         }
 
+        /**
+         * Load AI analysis using SSE (Server-Sent Events) for typewriter streaming effect.
+         * Falls back to standard POST if SSE fails.
+         */
         async function loadAnalysis(job) {
             const contentDiv = document.getElementById('modalAnalysisContent');
             const cacheKey = job.id || job.title;
@@ -293,6 +340,62 @@
                 </div>
             `;
 
+            // Try SSE streaming first
+            if (job.id && typeof EventSource !== 'undefined') {
+                try {
+                    const params = new URLSearchParams({
+                        jobId: job.id,
+                        title: job.title || '',
+                        location: job.location || '',
+                        salary: job.salary || ''
+                    });
+
+                    const eventSource = new EventSource(`/api/jobs/analyze/stream?${params}`);
+                    let fullText = '';
+
+                    contentDiv.innerHTML = '<p class="streaming-text"></p>';
+                    const textEl = contentDiv.querySelector('.streaming-text');
+
+                    eventSource.addEventListener('chunk', (e) => {
+                        fullText += e.data;
+                        textEl.innerHTML = formatAnalysis(fullText);
+                    });
+
+                    eventSource.addEventListener('done', (e) => {
+                        eventSource.close();
+                        analysisCache[cacheKey] = fullText;
+                        contentDiv.innerHTML = formatAnalysis(fullText);
+                    });
+
+                    eventSource.addEventListener('error', (e) => {
+                        eventSource.close();
+                        // Fallback to standard POST
+                        if (!fullText) {
+                            loadAnalysisFallback(job, contentDiv, cacheKey);
+                        }
+                    });
+
+                    eventSource.onerror = () => {
+                        eventSource.close();
+                        if (!fullText) {
+                            loadAnalysisFallback(job, contentDiv, cacheKey);
+                        }
+                    };
+
+                    return;
+                } catch (err) {
+                    console.warn('SSE failed, falling back to POST:', err);
+                }
+            }
+
+            // Fallback: standard POST
+            loadAnalysisFallback(job, contentDiv, cacheKey);
+        }
+
+        /**
+         * Fallback: standard POST analysis (non-streaming).
+         */
+        async function loadAnalysisFallback(job, contentDiv, cacheKey) {
             try {
                 const response = await fetch('/api/jobs/analyze', {
                     method: 'POST',

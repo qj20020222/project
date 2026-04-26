@@ -23,9 +23,20 @@ public class ResumeMetadata {
     @Column(nullable = false)
     private LocalDateTime uploadTime;
 
+    /**
+     * Processing status — state machine:
+     *   UPLOADED → PARSING → ANALYZING → COMPLETED
+     *                                  → FAILED
+     */
+    @Column(nullable = false, length = 20)
+    private String status = "UPLOADED";
+
     @PrePersist
     protected void onCreate() {
         uploadTime = LocalDateTime.now();
+        if (status == null) {
+            status = "UPLOADED";
+        }
     }
 
     // Getters and Setters
@@ -43,4 +54,7 @@ public class ResumeMetadata {
 
     public LocalDateTime getUploadTime() { return uploadTime; }
     public void setUploadTime(LocalDateTime uploadTime) { this.uploadTime = uploadTime; }
+
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
 }

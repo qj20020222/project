@@ -4,32 +4,78 @@ import com.example.hello.document.JobPosition;
 import com.example.hello.entity.StructuredResume;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
+import io.github.resilience4j.retry.annotation.Retry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
+/**
+ * LLM integration service with production-grade resilience patterns.
+ *
+ * Features:
+ *   - Circuit Breaker: stops calling LLM when failure rate > 50%
+ *   - Retry: exponential backoff (2s → 4s → 8s) on transient failures
+ *   - Rate Limiter: max 10 calls/second to avoid API throttling
+ *   - Redis Cache: LLM analysis results cached for 24h
+ *   - Graceful Fallback: returns mock data when LLM is unavailable
+ */
 @Service
 public class LLMService {
 
-    @Value("${llm.api.key:sk-4a78acc5c40a4ce7b51604dffcb4304f}")
+    private static final Logger log = LoggerFactory.getLogger(LLMService.class);
+
+    @Value("${llm.api.key}")
     private String apiKey;
 
-    @Value("${llm.api.url:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}")
+    @Value("${llm.api.url}")
     private String apiUrl;
 
-    @Value("${llm.model:qwen-plus}")
+    @Value("${llm.model}")
     private String model;
+
+    @Value("${llm.deepseek.api.key}")
+    private String deepseekApiKey;
+
+    @Value("${llm.deepseek.api.url}")
+    private String deepseekApiUrl;
+
+    @Value("${llm.deepseek.model}")
+    private String deepseekModel;
 
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final RedisTemplate<String, Object> redisTemplate;
 
+    private static final String ANALYSIS_CACHE_PREFIX = "llm:analysis:";
+    private static final long ANALYSIS_CACHE_TTL_HOURS = 24;
+
+    public LLMService(RedisTemplate<String, Object> redisTemplate) {
+        this.redisTemplate = redisTemplate;
+    }
+
+    // =====================================================
+    // Resume Structured Data Extraction (Qwen)
+    // =====================================================
+
+    @CircuitBreaker(name = "llmService", fallbackMethod = "extractStructuredDataFallback")
+    @Retry(name = "llmService")
+    @RateLimiter(name = "llmService")
     public StructuredResume extractStructuredData(String pdfText, String resumeId) {
-        System.out.println("Calling LLM API to extract data for resume ID: " + resumeId);
-        
+        log.info("Calling LLM API to extract structured data: resumeId={}", resumeId);
+        long startTime = System.currentTimeMillis();
+
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -42,39 +88,39 @@ public class LLMService {
                     "- \"skills\" (array of strings, e.g., ['Java', 'Spring'])\n\n" +
                     "Resume text:\n" + pdfText;
 
-            String requestBody = "{\n" +
-                    "  \"model\": \"" + model + "\",\n" +
-                    "  \"messages\": [\n" +
-                    "    {\"role\": \"system\", \"content\": \"You are a helpful assistant that extracts structured data from resumes and outputs ONLY JSON.\"},\n" +
-                    "    {\"role\": \"user\", \"content\": " + objectMapper.writeValueAsString(prompt) + "}\n" +
-                    "  ],\n" +
-                    "  \"temperature\": 0.1\n" +
-                    "}";
+            // Build request body using ObjectMapper (not manual string concat)
+            ObjectNode requestBody = objectMapper.createObjectNode();
+            requestBody.put("model", model);
+            requestBody.put("temperature", 0.1);
 
-            HttpEntity<String> requestEntity = new HttpEntity<>(requestBody, headers);
+            ArrayNode messages = requestBody.putArray("messages");
+            ObjectNode systemMsg = messages.addObject();
+            systemMsg.put("role", "system");
+            systemMsg.put("content", "You are a helpful assistant that extracts structured data from resumes and outputs ONLY JSON.");
+            ObjectNode userMsg = messages.addObject();
+            userMsg.put("role", "user");
+            userMsg.put("content", prompt);
+
+            HttpEntity<String> requestEntity = new HttpEntity<>(
+                    objectMapper.writeValueAsString(requestBody), headers);
 
             ResponseEntity<String> response = restTemplate.postForEntity(apiUrl, requestEntity, String.class);
 
             if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
                 JsonNode root = objectMapper.readTree(response.getBody());
                 String content = root.path("choices").get(0).path("message").path("content").asText();
-                
+
                 // Clean markdown formatting if LLM still returned it
-                if (content.startsWith("```json")) {
-                    content = content.substring(7);
-                }
-                if (content.endsWith("```")) {
-                    content = content.substring(0, content.length() - 3);
-                }
-                
+                content = cleanMarkdownJson(content);
+
                 JsonNode jsonResponse = objectMapper.readTree(content.trim());
-                
+
                 StructuredResume resume = new StructuredResume();
                 resume.setResumeId(resumeId);
                 resume.setEducation(jsonResponse.path("education").asText("未知"));
                 resume.setGraduationTime(jsonResponse.path("graduationTime").asText("未知"));
                 resume.setMajor(jsonResponse.path("major").asText("未知"));
-                
+
                 List<String> skills = new ArrayList<>();
                 if (jsonResponse.path("skills").isArray()) {
                     for (JsonNode skillNode : jsonResponse.path("skills")) {
@@ -82,20 +128,26 @@ public class LLMService {
                     }
                 }
                 resume.setSkills(objectMapper.writeValueAsString(skills));
-                
+
+                long elapsed = System.currentTimeMillis() - startTime;
+                log.info("LLM extraction completed: resumeId={}, elapsed={}ms", resumeId, elapsed);
                 return resume;
             }
         } catch (Exception e) {
-            System.err.println("Failed to call LLM API: " + e.getMessage());
-            System.err.println("Falling back to simulated parsing...");
-            e.printStackTrace();
+            long elapsed = System.currentTimeMillis() - startTime;
+            log.error("LLM API call failed: resumeId={}, elapsed={}ms, error={}", resumeId, elapsed, e.getMessage());
+            throw new RuntimeException("LLM API call failed: " + e.getMessage(), e);
         }
 
-        // Fallback or Mock data if API fails or network is blocked
-        return generateMockResume(resumeId);
+        throw new RuntimeException("LLM API returned unexpected response");
     }
 
-    private StructuredResume generateMockResume(String resumeId) {
+    /**
+     * Fallback method when circuit breaker is OPEN or all retries exhausted.
+     * Returns mock data so the system remains functional.
+     */
+    public StructuredResume extractStructuredDataFallback(String pdfText, String resumeId, Throwable t) {
+        log.warn("LLM fallback activated for resume extraction: resumeId={}, reason={}", resumeId, t.getMessage());
         StructuredResume resume = new StructuredResume();
         resume.setResumeId(resumeId);
         resume.setEducation("本科");
@@ -105,17 +157,34 @@ public class LLMService {
         return resume;
     }
 
-    // ---- Job Position Analysis (DeepSeek) ----
+    // =====================================================
+    // Job Position Analysis (DeepSeek) — with Redis Cache
+    // =====================================================
 
-    private static final String DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions";
-    private static final String DEEPSEEK_API_KEY = "sk-4a78acc5c40a4ce7b51604dffcb4304f";
-    private static final String DEEPSEEK_MODEL = "deepseek-chat";
-
+    @CircuitBreaker(name = "llmService", fallbackMethod = "analyzeJobFallback")
+    @Retry(name = "llmService")
+    @RateLimiter(name = "llmService")
     public String analyzeJob(JobPosition job) {
+        String cacheKey = ANALYSIS_CACHE_PREFIX + job.getId();
+
+        // Check Redis cache first
+        try {
+            Object cached = redisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                log.info("Cache HIT for job analysis: jobId={}", job.getId());
+                return cached.toString();
+            }
+        } catch (Exception e) {
+            log.warn("Redis cache read failed, proceeding without cache: {}", e.getMessage());
+        }
+
+        log.info("Cache MISS — calling DeepSeek API for job analysis: jobId={}, title={}", job.getId(), job.getTitle());
+        long startTime = System.currentTimeMillis();
+
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setBearerAuth(DEEPSEEK_API_KEY);
+            headers.setBearerAuth(deepseekApiKey);
 
             String skillsList = job.getSkillsRequirement() != null
                     ? String.join(", ", job.getSkillsRequirement()) : "无";
@@ -140,33 +209,76 @@ public class LLMService {
                 skillsList, job.getGraduationTimeRange()
             );
 
-            String requestBody = "{\n" +
-                "  \"model\": \"" + DEEPSEEK_MODEL + "\",\n" +
-                "  \"messages\": [\n" +
-                "    {\"role\": \"system\", \"content\": \"你是一位资深HR和职业规划师，擅长分析职位信息并给出专业建议。\"},\n" +
-                "    {\"role\": \"user\", \"content\": " + objectMapper.writeValueAsString(prompt) + "}\n" +
-                "  ],\n" +
-                "  \"temperature\": 0.7\n" +
-                "}";
+            // Build request body using ObjectMapper
+            ObjectNode requestBody = objectMapper.createObjectNode();
+            requestBody.put("model", deepseekModel);
+            requestBody.put("temperature", 0.7);
 
-            HttpEntity<String> requestEntity = new HttpEntity<>(requestBody, headers);
+            ArrayNode messages = requestBody.putArray("messages");
+            ObjectNode systemMsg = messages.addObject();
+            systemMsg.put("role", "system");
+            systemMsg.put("content", "你是一位资深HR和职业规划师，擅长分析职位信息并给出专业建议。");
+            ObjectNode userMsg = messages.addObject();
+            userMsg.put("role", "user");
+            userMsg.put("content", prompt);
+
+            HttpEntity<String> requestEntity = new HttpEntity<>(
+                    objectMapper.writeValueAsString(requestBody), headers);
+
             ResponseEntity<String> response = restTemplate.postForEntity(
-                DEEPSEEK_API_URL, requestEntity, String.class
+                deepseekApiUrl, requestEntity, String.class
             );
 
             if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
                 JsonNode root = objectMapper.readTree(response.getBody());
-                return root.path("choices").get(0).path("message").path("content").asText();
-            } else {
-                 System.err.println("DeepSeek API Error Response: " + response.getBody());
+                String analysis = root.path("choices").get(0).path("message").path("content").asText();
+
+                // Cache result in Redis (TTL = 24h)
+                try {
+                    redisTemplate.opsForValue().set(cacheKey, analysis, ANALYSIS_CACHE_TTL_HOURS, TimeUnit.HOURS);
+                    log.info("Cached job analysis in Redis: jobId={}, ttl={}h", job.getId(), ANALYSIS_CACHE_TTL_HOURS);
+                } catch (Exception e) {
+                    log.warn("Redis cache write failed: {}", e.getMessage());
+                }
+
+                long elapsed = System.currentTimeMillis() - startTime;
+                log.info("DeepSeek analysis completed: jobId={}, elapsed={}ms", job.getId(), elapsed);
+                return analysis;
             }
         } catch (Exception e) {
-            System.err.println("DeepSeek analyzeJob failed: " + e.getMessage());
-            if (e.getMessage() != null && e.getMessage().contains("Insufficient Balance")) {
-                return "API 账户余额不足，请充值后重试 (402 Payment Required)。";
-            }
-            return "AI 暂时无法获取分析，请稍后重试。(" + e.getMessage() + ")";
+            long elapsed = System.currentTimeMillis() - startTime;
+            log.error("DeepSeek API call failed: jobId={}, elapsed={}ms, error={}", job.getId(), elapsed, e.getMessage());
+            throw new RuntimeException("DeepSeek API call failed: " + e.getMessage(), e);
         }
-        return "AI 暂时无法获取分析，请稍后重试。";
+
+        throw new RuntimeException("DeepSeek API returned unexpected response");
+    }
+
+    /**
+     * Fallback when circuit breaker is OPEN for job analysis.
+     */
+    public String analyzeJobFallback(JobPosition job, Throwable t) {
+        log.warn("LLM fallback activated for job analysis: jobId={}, reason={}", job.getId(), t.getMessage());
+
+        if (t.getMessage() != null && t.getMessage().contains("Insufficient Balance")) {
+            return "API 账户余额不足，请充值后重试 (402 Payment Required)。";
+        }
+        return "AI 分析服务暂时不可用（熔断器已激活），请稍后重试。\n原因：" + t.getMessage();
+    }
+
+    // =====================================================
+    // Utility
+    // =====================================================
+
+    private String cleanMarkdownJson(String content) {
+        if (content.startsWith("```json")) {
+            content = content.substring(7);
+        } else if (content.startsWith("```")) {
+            content = content.substring(3);
+        }
+        if (content.endsWith("```")) {
+            content = content.substring(0, content.length() - 3);
+        }
+        return content.trim();
     }
 }
