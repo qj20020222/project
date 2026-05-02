@@ -8,6 +8,8 @@ import jakarta.servlet.http.HttpSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -66,7 +68,8 @@ public class AuthController {
     }
 
     @GetMapping("/currentUser")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> getCurrentUser(HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getCurrentUser(HttpServletRequest request,
+                                                                            Authentication authentication) {
         HttpSession session = request.getSession(false);
         if (session != null && session.getAttribute("userId") != null) {
             Map<String, Object> userInfo = new HashMap<>();
@@ -74,6 +77,17 @@ public class AuthController {
             userInfo.put("username", session.getAttribute("username"));
             return ResponseEntity.ok(ApiResponse.success(userInfo));
         }
+
+        if (authentication != null
+                && authentication.isAuthenticated()
+                && authentication.getPrincipal() instanceof OAuth2User oauth2User) {
+            Map<String, Object> userInfo = new HashMap<>();
+            userInfo.put("username", oauth2User.getAttribute("name"));
+            userInfo.put("email", oauth2User.getAttribute("email"));
+            userInfo.put("provider", "google");
+            return ResponseEntity.ok(ApiResponse.success(userInfo));
+        }
+
         return ResponseEntity.ok(ApiResponse.error(401, "Not logged in"));
     }
 }

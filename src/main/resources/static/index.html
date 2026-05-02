@@ -109,6 +109,29 @@
         let isLoading = false;
         let hasMore = true;
 
+        async function checkAuthStatus() {
+            try {
+                const response = await fetch('/api/auth/currentUser');
+                const result = await response.json();
+                const user = result.data;
+
+                if (result.code === 200 && user && user.username) {
+                    isAuthenticated = true;
+                    document.getElementById('loginBtn').style.display = 'none';
+                    document.getElementById('userInfo').style.display = 'flex';
+                    document.getElementById('userName').textContent = user.username;
+                } else {
+                    isAuthenticated = false;
+                    document.getElementById('loginBtn').style.display = 'inline-flex';
+                    document.getElementById('userInfo').style.display = 'none';
+                    document.getElementById('userName').textContent = '';
+                }
+            } catch (error) {
+                console.error('Failed to check auth status', error);
+                isAuthenticated = false;
+            }
+        }
+
         document.getElementById('resumeFile').addEventListener('change', async (e) => {
             if (!isAuthenticated) {
                 alert('请先登录再上传简历！');
@@ -453,6 +476,7 @@
         });
 
         // Initial load
+        checkAuthStatus();
         refreshJobs();
     </script>
 </body>

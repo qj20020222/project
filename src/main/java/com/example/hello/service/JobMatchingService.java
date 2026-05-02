@@ -73,7 +73,12 @@ public class JobMatchingService {
                 resumeId, resume.getEducation(), resume.getMajor(), userSkills);
 
         try {
-            return searchWithElasticsearch(resume, userSkills, page, size);
+            List<JobPosition> esResults = searchWithElasticsearch(resume, userSkills, page, size);
+            if (esResults.isEmpty()) {
+                log.info("Elasticsearch returned no matches, falling back to JPA matching");
+                return fallbackJpaMatching(resume, userSkills, page, size);
+            }
+            return esResults;
         } catch (Exception e) {
             log.warn("Elasticsearch query failed, falling back to JPA: {}", e.getMessage());
             return fallbackJpaMatching(resume, userSkills, page, size);

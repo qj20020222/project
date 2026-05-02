@@ -20,7 +20,7 @@ public class JobPosition {
     @Column
     private String educationRequirement;
 
-    @ElementCollection
+    @ElementCollection(fetch = FetchType.EAGER)
     private List<String> skillsRequirement;
 
     @Column

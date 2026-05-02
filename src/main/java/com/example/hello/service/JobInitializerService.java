@@ -49,33 +49,49 @@ public class JobInitializerService {
 
     @PostConstruct
     public void init() {
-        // Step 1: Seed MySQL if empty
-        if (jobPositionRepository.count() == 0) {
-            log.info("MySQL is empty — seeding 500 mock job positions...");
-            List<JobPosition> jobs = new ArrayList<>();
-            Random random = new Random();
-
-            for (int i = 0; i < 500; i++) {
-                JobPosition job = new JobPosition();
-                int titleIndex = random.nextInt(TITLES.length);
-                job.setTitle(TITLES[titleIndex]);
-                job.setLocation(LOCATIONS[random.nextInt(LOCATIONS.length)]);
-                job.setEducationRequirement(EDUCATIONS[random.nextInt(EDUCATIONS.length)]);
-                job.setSkillsRequirement(Arrays.asList(SKILLS[titleIndex % SKILLS.length]));
-                job.setSalary(SALARIES[random.nextInt(SALARIES.length)]);
-                job.setTargetMajor(MAJORS[random.nextInt(MAJORS.length)]);
-                job.setGraduationTimeRange(GRAD_TIMES[random.nextInt(GRAD_TIMES.length)]);
-                jobs.add(job);
+        long count = jobPositionRepository.count();
+        if (count == 0 || shouldReseedJobData()) {
+            if (count > 0) {
+                log.info("Existing job data looks outdated or garbled; reseeding job positions...");
+                jobPositionRepository.deleteAll();
+            } else {
+                log.info("MySQL is empty - seeding 500 mock job positions...");
             }
 
-            jobPositionRepository.saveAll(jobs);
+            seedJobs();
             log.info("MySQL: 500 job positions seeded successfully");
         } else {
-            log.info("MySQL: {} job positions already exist", jobPositionRepository.count());
+            log.info("MySQL: {} job positions already exist", count);
         }
 
-        // Step 2: Sync MySQL → Elasticsearch (full re-index on startup)
         syncToElasticsearch();
+    }
+
+    private boolean shouldReseedJobData() {
+        return jobPositionRepository.findAll().stream()
+                .limit(20)
+                .noneMatch(job -> MAJORS[0].equals(job.getTargetMajor())
+                        || MAJORS[5].equals(job.getTargetMajor()));
+    }
+
+    private void seedJobs() {
+        List<JobPosition> jobs = new ArrayList<>();
+        Random random = new Random();
+
+        for (int i = 0; i < 500; i++) {
+            JobPosition job = new JobPosition();
+            int titleIndex = random.nextInt(TITLES.length);
+            job.setTitle(TITLES[titleIndex]);
+            job.setLocation(LOCATIONS[random.nextInt(LOCATIONS.length)]);
+            job.setEducationRequirement(EDUCATIONS[random.nextInt(EDUCATIONS.length)]);
+            job.setSkillsRequirement(Arrays.asList(SKILLS[titleIndex % SKILLS.length]));
+            job.setSalary(SALARIES[random.nextInt(SALARIES.length)]);
+            job.setTargetMajor(MAJORS[random.nextInt(MAJORS.length)]);
+            job.setGraduationTimeRange(GRAD_TIMES[random.nextInt(GRAD_TIMES.length)]);
+            jobs.add(job);
+        }
+
+        jobPositionRepository.saveAll(jobs);
     }
 
     /**
@@ -94,7 +110,6 @@ public class JobInitializerService {
 
             jobPositionEsRepository.saveAll(esDocs);
             log.info("Elasticsearch: {} documents indexed successfully", esDocs.size());
-
         } catch (Exception e) {
             log.error("Failed to sync to Elasticsearch (search will use JPA fallback): {}", e.getMessage());
         }
