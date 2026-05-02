@@ -13,9 +13,13 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -49,6 +53,28 @@ public class ResumeController {
         }
 
         try {
+            byte[] fileBytes = file.getBytes();
+            String fileHash = calculateSha256(fileBytes);
+
+            var existingResume = resumeMetadataRepository.findByFileHash(fileHash);
+            if (existingResume.isPresent()) {
+                ResumeMetadata metadata = existingResume.get();
+                if ("FAILED".equals(metadata.getStatus())) {
+                    metadata.setStatus("UPLOADED");
+                    resumeMetadataRepository.save(metadata);
+                    rabbitMQProducer.sendResumeUploadMessage(metadata.getResumeId(), metadata.getFilePath());
+                }
+
+                Map<String, String> data = new HashMap<>();
+                data.put("resumeId", metadata.getResumeId());
+                data.put("status", metadata.getStatus());
+                data.put("duplicate", "true");
+
+                log.info("Duplicate resume upload detected: resumeId={}, file={}, hash={}",
+                        metadata.getResumeId(), file.getOriginalFilename(), fileHash);
+                return ResponseEntity.ok(ApiResponse.success("Resume already exists", data));
+            }
+
             // Ensure upload directory exists
             Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
             if (!Files.exists(uploadPath)) {
@@ -59,13 +85,14 @@ public class ResumeController {
             String resumeId = UUID.randomUUID().toString();
             String fileName = resumeId + ".pdf";
             Path targetLocation = uploadPath.resolve(fileName);
-            Files.copy(file.getInputStream(), targetLocation, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            Files.write(targetLocation, fileBytes, StandardOpenOption.CREATE_NEW);
 
             // Save metadata to DB with initial status
             ResumeMetadata metadata = new ResumeMetadata();
             metadata.setResumeId(resumeId);
             metadata.setName(file.getOriginalFilename());
             metadata.setFilePath(targetLocation.toString());
+            metadata.setFileHash(fileHash);
             metadata.setStatus("UPLOADED");
             resumeMetadataRepository.save(metadata);
 
@@ -83,6 +110,15 @@ public class ResumeController {
         } catch (IOException e) {
             log.error("File upload failed: {}", e.getMessage(), e);
             throw new BusinessException(500, "Could not upload the file: " + e.getMessage());
+        }
+    }
+
+    private String calculateSha256(byte[] fileBytes) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(fileBytes));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 algorithm is not available", e);
         }
     }
 

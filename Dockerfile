@@ -1,14 +1,20 @@
-# Use official OpenJDK 17 image as base
+FROM maven:3.9-eclipse-temurin-17-alpine AS build
+
+WORKDIR /workspace
+
+COPY pom.xml .
+COPY src ./src
+RUN mvn -DskipTests package
+
 FROM eclipse-temurin:17-jre-alpine
 
-# Set the working directory inside the container
 WORKDIR /app
 
-# Copy the packaged jar file into the container
-COPY target/hello-0.0.1-SNAPSHOT.jar app.jar
+RUN addgroup -S spring && adduser -S spring -G spring
+COPY --from=build /workspace/target/hello-0.0.1-SNAPSHOT.jar app.jar
+RUN mkdir -p /app/uploads && chown -R spring:spring /app
 
-# Expose port 8080 (the default port for Spring Boot applications)
+USER spring
 EXPOSE 8080
 
-# Command to run the application
 ENTRYPOINT ["java", "-jar", "app.jar"]

@@ -1,15 +1,47 @@
-version: '3.8'
+name: talent-matcher
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: talent-matcher:latest
+    container_name: talent_matcher_app
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/resume_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=UTF-8
+      SPRING_DATASOURCE_USERNAME: user
+      SPRING_DATASOURCE_PASSWORD: password
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: guest
+      SPRING_RABBITMQ_PASSWORD: guest
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
+      RESUME_UPLOAD_DIR: /app/uploads
+    ports:
+      - "8080:8080"
+    volumes:
+      - app_uploads:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   mysql:
     image: mysql:8.0
-    container_name: resume_mysql
+    container_name: talent_matcher_mysql
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: resume_db
       MYSQL_USER: user
       MYSQL_PASSWORD: password
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -20,7 +52,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:3-management
-    container_name: resume_rabbitmq
+    container_name: talent_matcher_rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
@@ -37,7 +69,7 @@ services:
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.10.2
-    container_name: resume_elasticsearch
+    container_name: talent_matcher_elasticsearch
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -54,7 +86,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: resume_redis
+    container_name: talent_matcher_redis
     ports:
       - "6379:6379"
     volumes:
@@ -67,6 +99,7 @@ services:
       retries: 5
 
 volumes:
+  app_uploads:
   mysql_data:
   rabbitmq_data:
   es_data:

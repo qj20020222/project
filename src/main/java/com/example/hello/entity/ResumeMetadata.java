@@ -20,6 +20,9 @@ public class ResumeMetadata {
     @Column(nullable = false)
     private String filePath;
 
+    @Column(length = 64, unique = true)
+    private String fileHash;
+
     @Column(nullable = false)
     private LocalDateTime uploadTime;
 
@@ -51,6 +54,9 @@ public class ResumeMetadata {
 
     public String getFilePath() { return filePath; }
     public void setFilePath(String filePath) { this.filePath = filePath; }
+
+    public String getFileHash() { return fileHash; }
+    public void setFileHash(String fileHash) { this.fileHash = fileHash; }
 
     public LocalDateTime getUploadTime() { return uploadTime; }
     public void setUploadTime(LocalDateTime uploadTime) { this.uploadTime = uploadTime; }

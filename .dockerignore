@@ -1,0 +1,10 @@
+.git
+.mvn
+target
+uploads
+*.log
+diff.txt
+nohup.out
+README.md
+UPGRADE_GUIDE.md
+dummy.pdf

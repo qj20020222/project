@@ -9,4 +9,5 @@ import java.util.Optional;
 @Repository
 public interface ResumeMetadataRepository extends JpaRepository<ResumeMetadata, Long> {
     Optional<ResumeMetadata> findByResumeId(String resumeId);
+    Optional<ResumeMetadata> findByFileHash(String fileHash);
 }
